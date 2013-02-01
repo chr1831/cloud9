@@ -146,6 +146,9 @@ var config = [
             //"ext/githistory/githistory",
             "ext/autosave/autosave",
             "ext/revisions/revisions",
+            "ext/xquery/xquery",
+            "ext/28msec/28msec",
+            //"ext/splitview/splitview"
             "ext/language/liveinspect",
             "ext/splitview/splitview"
             //"ext/minimap/minimap"
