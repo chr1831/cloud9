@@ -2,7 +2,11 @@
 
 CMD="$(readlink $0)"
 CMD_DIR=`dirname "$CMD"`
-cd "$CMD_DIR/.."
+
+if [$CMD_DIR != "*bin/"]
+    then
+    cd "$CMD_DIR/.."
+fi
 
 make update
 
