@@ -27,7 +27,7 @@ var HIDE_DOC_DELAY = 1000;
 var AUTO_OPEN_DELAY = 200;
 var AUTO_UPDATE_DELAY = 200;
 var CRASHED_COMPLETION_TIMEOUT = 6000;
-var MENU_WIDTH = 330;
+var MENU_WIDTH = 400;
 var MENU_SHOWN_ITEMS = 9;
 var EXTRA_LINE_HEIGHT = 3;
 var QFBOX_MINTIME = 500;
@@ -354,7 +354,8 @@ module.exports = {
                 if (!isDrawDocInvokeScheduled || delayPopup)
                     drawDocInvoke.schedule(SHOW_DOC_DELAY);
             }
-            this.docElement.innerHTML += selected.preview + '</span>';
+            this.docElement.innerHTML += 
+                selected.preview.replace(/\n/g, '<br/>') + '</span>';
         }
         else {
             txtQuickfixDoc.parentNode.hide();

@@ -33,6 +33,8 @@ var ADD = {
  */
 var XQueryResolver = function(ast){
     
+
+    
     //-----------------------------------
     // UTILITY FUNCTIONS
     //-----------------------------------
@@ -82,7 +84,26 @@ var XQueryResolver = function(ast){
     }
     
     
-    this.getResolutions = function(marker){
+    this.getModulesContainingFunction = function(fun){
+        var ret = [];
+        for (var module in this.builtin){
+            if (this.moduleContainsFunction(module,fun)){
+                ret[module] = this.builtin[module];
+            }
+        }
+        return ret;
+    };
+    
+    this.moduleContainsFunction = function(module, fun){
+        return this.builtin.hasOwnProperty(module) &&
+                this.builtin[module].functions.hasOwnProperty(fun);
+    };
+    
+    this.getResolutions = function(marker, builtin){
+        this.builtin = builtin;
+        if (!this.builtin){
+            this.builtin = {};
+        }
         var type = this.getType(marker);
         if (type){
             if (typeof this[type] === 'function'){
@@ -130,9 +151,31 @@ var XQueryResolver = function(ast){
     };
     
     this.unusedNamespace = function(marker){
-        // TODO if there is a XPST0081 somewhere (prefix not found), also
-        // suggest to rename the unused namespace prefix to that prefix
+        var _self = this;
+        var ret = [];
         
+        // unusednamespace prefix = URILiteral
+        // check for each XPST0081 (prefix2:localName) whether URILiteral 
+        // contains localName, if so suggest to rename prefix to prefix2.
+        
+        // Resolution 1: Change unused namespace prefix to prefix that cannot be
+        // expanded to URI (XPST0081)
+        var unusedNs = marker.ns;
+        ast.markers.forEach(function(mrk){
+            if (_self.getType(mrk) == "XPST0081"){
+                var nonExpandablePrefix = mrk.prefix;
+                var localName = mrk.localName;
+                if (_self.moduleContainsFunction(unusedNs, localName)){
+                    // The unused namespace contains the required function, suggest to
+                    // rename the unused prefix to the nonexpandable one
+                    ret.push(_self.resRename(marker, 
+                        "Rename prefix to " + nonExpandablePrefix,
+                        nonExpandablePrefix, RENAME.name));
+                }
+            }
+        });
+        
+        // Resolution 2: Remove unused namespace prefix
         var label = "Remove unused namespace prefix";
         var image = IMG_DELETE;
         
@@ -141,7 +184,8 @@ var XQueryResolver = function(ast){
           
         var appliedContent = astToText(removedAst);
         var preview = appliedContent;
-        return [markerResolution(label,image,preview,appliedContent)];
+        ret.push(markerResolution(label,image,preview,appliedContent));
+        return ret;
     };
     
     this.duplicateNamespace = function(marker){
@@ -160,54 +204,65 @@ var XQueryResolver = function(ast){
     this.XPST0081 = function(marker){
         var _self = this;
         
-        var prefix = marker.message.split('"')[1];
+        var prefix = marker.prefix;
+        var localName = marker.localName;
+        
+        // The modules known to contain the function to be called
+        var containingModules = this.getModulesContainingFunction(localName);
 
-
-        // Resolution family 1: Change prefix to imported prefix
+        // Resolution 1: Change prefix to imported prefix
         var renames = [];
         var localRenames = [];
-        var currentNamespaces = [];
-        for (var ns in ast.sctx.namespaces){
-            if (ast.sctx.namespaces.hasOwnProperty(ns)){
-                currentNamespaces.push(ns);
+        var currentPrefixes = [];
+        var currentNs = [];
+        for (var curPrefix in ast.sctx.namespaces){
+            if (ast.sctx.namespaces.hasOwnProperty(curPrefix)){
+                currentPrefixes.push(curPrefix);
+                currentNs.push(ast.sctx.namespaces[curPrefix]);
             }
         }
 
-        currentNamespaces.forEach(function(ns){
-            if (!localRenames[ns]){
-                localRenames[ns] = true;
+        currentPrefixes.forEach(function(curPrefix){
+            if (!localRenames[curPrefix]){
+                localRenames[curPrefix] = true;
                 renames.push({
                    marker: marker,
-                   label: "Change prefix to " + ns,
-                   toName: ns,
+                   label: "Change prefix to " + curPrefix,
+                   toName: curPrefix,
+                   hasFunction: (containingModules.hasOwnProperty(ast.sctx.namespaces[curPrefix]) ? 1 : 0),
                    renameType: RENAME.prefix
                 });
             }
         });        
         
-        // Resolution family 2: Rename existing import
+        // Resolution 2: Rename existing module import
         var nsRenames = [];
         ast.markers.forEach(function(mrk){
-            if (_self.getType(mrk) == "unusedNamespace"){
-                // TODO make sure we don't propose to change unused NamespaceDecl
+            if (_self.getType(mrk) == "unusedNamespace" && mrk.nsType === 'module'){
                 var unusedPrefix = mrk.message.split('"')[1];
-                if (!nsRenames[ns]){
-                    nsRenames[ns] = true;
+                if (!nsRenames[unusedPrefix]){
+                    nsRenames[unusedPrefix] = true;
                     renames.push({
                        marker: mrk,
                        label: 'Change unused namespace prefix "' + unusedPrefix +'" to '
                         + prefix,
                        toName: prefix,
                        fromName: unusedPrefix,
+                       hasFunction: (containingModules.hasOwnProperty(mrk.ns) ? 1 : 0),
                        renameType: RENAME.name
                     });
                 }                
             }
         });
         
-        // TODO prefer prefixes that contain the function that is to be called
+        // Sort the renames primarily by whether they contain the required
+        // function, secondarily by the edit distance to the required prefix
         renames.sort(
             function(a,b){
+                var hasFuncDist = b.hasFunction - a.hasFunction;
+                if (hasFuncDist){
+                    return hasFuncDist;
+                }
                 var compareA = a.fromName || a.toName;
                 var compareB = b.fromName || b.toName;
                 return lDistance(compareA,prefix) - lDistance(compareB,prefix);
@@ -215,7 +270,8 @@ var XQueryResolver = function(ast){
         );
         
         var renameResolutions = [];
-        for (var i = 0; i < NUM_NSRENAME_SUGGESTIONS && i < renames.length; i++){
+        for (var i = 0; i < NUM_NSRENAME_SUGGESTIONS && i < renames.length &&
+             renames[i].hasFunction; i++){
             var rename = renames[i];
             var resolution = this.resRename(rename.marker, rename.label, 
                                             rename.toName, rename.renameType);
@@ -223,13 +279,22 @@ var XQueryResolver = function(ast){
         }
         
                 
-        // Resolution family 3: Add import / namespacedecl
-        // TODO also propose to add imports that contain the function that is to be called
-        var addResolution = this.resAddModuleImport(prefix,"");
+        // Resolution 3: Add import / namespacedecl
+        var addResolutions = [];
+        //addResolutions.push(this.resDebug("debug", JSON.stringify(marker, null, 2)));
         
-        var ret = [];
+        // Add imports containing the function to be called
+        for (var module in containingModules){
+            if (containingModules.hasOwnProperty(module) 
+                && currentNs.indexOf(module) == -1){
+                addResolutions.push(this.resAddModuleImport(prefix, module));
+            }
+        }
         
-        ret.push(addResolution);
+        // Add unknown import with this prefix
+        addResolutions.push(this.resAddModuleImport(prefix,""));
+                
+        var ret = addResolutions;
         
         for (var i = 0; 
              i < NUM_NSRENAME_SUGGESTIONS && i < renameResolutions.length; i++){
@@ -286,7 +351,7 @@ var XQueryResolver = function(ast){
         }
         
         var appliedContent = astToText(newAst);
-        var preview = appliedContent + ", targetPos: " + JSON.stringify(newAst.cursorTarget);
+        var preview = appliedContent; // + ", targetPos: " + JSON.stringify(newAst.cursorTarget);
         var ret = markerResolution(label,image,preview,appliedContent,newAst.cursorTarget);
         ret.addType = addType;
         return ret;
@@ -307,6 +372,9 @@ var XQueryResolver = function(ast){
     
     this.resAddModuleImport = function(ncName, uriLiterals){
       uriLiterals = uriLiterals || [];
+      if (!(uriLiterals instanceof Array)){
+          uriLiterals = [uriLiterals];
+      }
       var label = 'Import Module ' + ncName;
       if (uriLiterals.length && uriLiterals[0].length){
           label += ' = "' + uriLiterals[0] + '"';
@@ -316,6 +384,10 @@ var XQueryResolver = function(ast){
           URILiterals: uriLiterals
       };
       return this.resAdd(label, node, ADD.ModuleImport);
+    };
+    
+    this.resDebug = function(label, preview){
+      return markerResolution(label, IMG_ADD, preview, preview);  
     };
  
     
