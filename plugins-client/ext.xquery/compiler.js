@@ -94,7 +94,6 @@ define(function(require, exports, module) {
           var text = completeUtil.fetchText(this.staticPrefix, 'ext/xquery/lib/builtin.json');
           builtin = JSON.parse(text); 
         }
-        throw "staticPrefix = " + this.staticPrefix;
         
         if(schemas === null) {
           var text = completeUtil.fetchText(this.staticPrefix, 'ext/xquery/lib/schemas.json');
